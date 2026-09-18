@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NEON BREAK</title>
+<style>
+  :root{
+    --bg:#0a0e17;
+    --panel:#0f1524;
+    --grid:#161d2e;
+    --cyan:#3ff5e0;
+    --magenta:#ff3fb0;
+    --amber:#ffb23f;
+    --lime:#8bff3f;
+    --text:#d8e6f5;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; height:100%;
+    background:
+      radial-gradient(ellipse at 50% -10%, #16203a 0%, var(--bg) 55%);
+    font-family: 'Courier New', ui-monospace, monospace;
+    color:var(--text);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .cab{
+    display:flex; flex-direction:column; align-items:center;
+    gap:14px; padding:20px;
+    width:100%; max-width:520px;
+  }
+  .title{
+    font-size:28px; letter-spacing:6px; font-weight:700;
+    color:var(--cyan);
+    text-shadow:0 0 6px var(--cyan), 0 0 22px rgba(63,245,224,.5);
+    margin:0;
+  }
+  .hud{
+    width:100%; display:flex; justify-content:space-between;
+    font-size:13px; letter-spacing:2px; color:var(--text);
+    padding:0 4px;
+  }
+  .hud span{color:var(--amber); text-shadow:0 0 6px rgba(255,178,63,.6);}
+  #wrap{
+    position:relative; border-radius:10px;
+    background:var(--panel);
+    box-shadow:
+      0 0 0 1px var(--grid),
+      0 0 40px rgba(63,245,224,.08),
+      inset 0 0 60px rgba(0,0,0,.6);
+    padding:10px;
+  }
+  canvas{
+    display:block; border-radius:4px;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 24px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/24px 100%,
+      #070a12;
+  }
+  .msg{
+    position:absolute; inset:0; display:none;
+    align-items:center; justify-content:center; flex-direction:column;
+    gap:10px; background:rgba(7,10,18,.85); border-radius:4px;
+    text-align:center; padding:20px;
+  }
+  .msg.show{display:flex;}
+  .msg h2{
+    margin:0; font-size:22px; letter-spacing:4px;
+    color:var(--magenta); text-shadow:0 0 10px rgba(255,63,176,.7);
+  }
+  .msg p{margin:0; font-size:13px; color:var(--text); opacity:.85;}
+  .btn{
+    margin-top:6px; padding:10px 22px; font-family:inherit;
+    font-size:13px; letter-spacing:3px; font-weight:700;
+    background:transparent; color:var(--lime);
+    border:1px solid var(--lime); border-radius:3px;
+    cursor:pointer;
+    text-shadow:0 0 6px rgba(139,255,63,.6);
+    box-shadow:0 0 12px rgba(139,255,63,.15);
+  }
+  .btn:active{transform:translateY(1px);}
+  .controls{font-size:11px; letter-spacing:1px; opacity:.55; text-align:center;}
+  .legend{
+    display:flex; gap:14px; font-size:10px; letter-spacing:1px; opacity:.7;
+    flex-wrap:wrap; justify-content:center;
+  }
+  .legend span{display:inline-flex; align-items:center; gap:4px;}
+  .dot{width:8px; height:8px; border-radius:50%; display:inline-block;}
+</style>
+</head>
+<body>
+<div class="cab">
+  <h1 class="title">NEON BREAK</h1>
+  <div class="hud">
+    <div>SCORE <span id="score">000</span></div>
+    <div>LEVEL <span id="level">1</span></div>
+    <div>LIVES <span id="lives">●●●</span></div>
+  </div>
+  <div id="wrap">
+    <canvas id="game" width="480" height="460"></canvas>
+    <div class="msg show" id="overlay">
+      <h2 id="overlayTitle">NEON BREAK</h2>
+      <p id="overlayText">Arrow keys / A·D to move — Space to launch<br>Touch: drag anywhere to move, tap to launch<br>Break bricks for a chance at power-ups!</p>
+      <button class="btn" id="startBtn">START</button>
+    </div>
+  </div>
+  <div class="controls">← → or A / D to move · SPACE to launch · P to pause</div>
+  <div class="legend">
+    <span><i class="dot" style="background:#3ff5e0;box-shadow:0 0 6px #3ff5e0"></i>Multi-ball</span>
+    <span><i class="dot" style="background:#8bff3f;box-shadow:0 0 6px #8bff3f"></i>Wide paddle</span>
+    <span><i class="dot" style="background:#ffb23f;box-shadow:0 0 6px #ffb23f"></i>Extra life</span>
+    <span><i class="dot" style="background:#ff3fb0;box-shadow:0 0 6px #ff3fb0"></i>Slow ball</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  const scoreEl = document.getElementById('score');
+  const levelEl = document.getElementById('level');
+  const livesEl = document.getElementById('lives');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+
+  const rowColors = ['#ff3fb0','#ffb23f','#ffe73f','#8bff3f','#3ff5e0','#8f8fff','#ff7a3f'];
+
+  const WALL = 22; // thickness of visible side walls (left/right only)
+
+  let paddle, balls, bricks, drops, score, lives, level, running, launched, paused;
+  let basePaddleW = 84;
+
+  const PADDLE_H = 12, BALL_R = 6;
+  const BRICK_ROWS = 7, BRICK_COLS = 10, BRICK_H = 16, BRICK_PAD = 4, BRICK_TOP = 46;
+
+  const POWERUPS = [
+    { type:'multi',  color:'#3ff5e0', weight:5 },
+    { type:'wide',   color:'#8bff3f', weight:4 },
+    { type:'life',   color:'#ffb23f', weight:2 },
+    { type:'slow',   color:'#ff3fb0', weight:3 },
+  ];
+  function rollPowerup(){
+    if(Math.random() > 0.22) return null; // ~22% of bricks drop something
+    const total = POWERUPS.reduce((s,p)=>s+p.weight,0);
+    let r = Math.random()*total;
+    for(const p of POWERUPS){ if(r < p.weight) return p.type; r -= p.weight; }
+    return POWERUPS[0].type;
+  }
+
+  function newBall(x, y, dx, dy, speed){
+    return { x, y, r: BALL_R, dx, dy, speed };
+  }
+
+  function initLevel(keepScore){
+    paddle = { x: W/2 - basePaddleW/2, y: H - 28, w: basePaddleW, h: PADDLE_H, speed: 7, dx: 0 };
+    const speed = 5.6 + (level-1)*0.4;
+    balls = [ newBall(W/2, paddle.y - BALL_R - 1, 0, 0, speed) ];
+    launched = false;
+    drops = [];
+
+    const brickW = (W - 2*WALL - 12 - (BRICK_COLS-1)*BRICK_PAD) / BRICK_COLS;
+    bricks = [];
+    for(let r=0;r<BRICK_ROWS;r++){
+      for(let c=0;c<BRICK_COLS;c++){
+        bricks.push({
+          x: WALL + 6 + c*(brickW+BRICK_PAD),
+          y: BRICK_TOP + r*(BRICK_H+BRICK_PAD),
+          w: brickW, h: BRICK_H,
+          alive: true,
+          color: rowColors[r % rowColors.length],
+          points: (BRICK_ROWS - r) * 10
+        });
+      }
+    }
+    if(!keepScore){ score = 0; lives = 3; level = 1; basePaddleW = 84; }
+    updateHUD();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = String(score).padStart(3,'0');
+    levelEl.textContent = level;
+    livesEl.textContent = '●'.repeat(Math.max(lives,0)) + '○'.repeat(Math.max(3-lives,0));
+  }
+
+  function showOverlay(title, text, btnLabel){
+    overlayTitle.textContent = title;
+    overlayText.innerHTML = text;
+    startBtn.textContent = btnLabel;
+    overlay.classList.add('show');
+  }
+  function hideOverlay(){ overlay.classList.remove('show'); }
+
+  function launchBall(){
+    if(launched) return;
+    launched = true;
+    for(const b of balls){
+      const angle = (-Math.PI/2) + (Math.random()*0.6 - 0.3);
+      b.dx = Math.cos(angle) * b.speed;
+      b.dy = Math.sin(angle) * b.speed;
+    }
+  }
+
+  // Input
+  const keys = {};
+  window.addEventListener('keydown', e=>{
+    keys[e.key] = true;
+    if(e.key === ' '){ e.preventDefault(); if(running && !paused) launchBall(); }
+    if(e.key.toLowerCase() === 'p' && running) togglePause();
+  });
+  window.addEventListener('keyup', e=>{ keys[e.key] = false; });
+
+  canvas.addEventListener('touchmove', e=>{
+    if(!running) return;
+    const rect = canvas.getBoundingClientRect();
+    const tx = (e.touches[0].clientX - rect.left) * (W/rect.width);
+    paddle.x = Math.min(Math.max(tx - paddle.w/2, WALL), W - WALL - paddle.w);
+    e.preventDefault();
+  }, {passive:false});
+  canvas.addEventListener('touchstart', ()=>{ if(running && !paused) launchBall(); });
+
+  function togglePause(){
+    paused = !paused;
+    if(paused) showOverlay('PAUSED','Press P to resume','RESUME');
+    else hideOverlay();
+  }
+
+  startBtn.addEventListener('click', ()=>{
+    if(paused){ togglePause(); return; }
+    initLevel(false);
+    running = true; paused = false;
+    hideOverlay();
+  });
+
+  function applyPowerup(type){
+    if(type === 'multi'){
+      const extra = [];
+      for(const b of balls){
+        const angle = Math.random()*Math.PI*2;
+        const nb = newBall(b.x, b.y, Math.cos(angle)*b.speed, -Math.abs(Math.sin(angle)*b.speed)-1, b.speed);
+        extra.push(nb);
+      }
+      balls.push(...extra);
+    } else if(type === 'wide'){
+      basePaddleW = Math.min(basePaddleW + 24, 180);
+      paddle.w = basePaddleW;
+      paddle.x = Math.min(paddle.x, W - WALL - paddle.w);
+    } else if(type === 'life'){
+      lives++; updateHUD();
+    } else if(type === 'slow'){
+      for(const b of balls){
+        b.speed = Math.max(b.speed*0.8, 3);
+        const mag = Math.hypot(b.dx,b.dy) || 1;
+        b.dx = (b.dx/mag)*b.speed;
+        b.dy = (b.dy/mag)*b.speed;
+      }
+    }
+  }
+
+  function update(){
+    if(!running || paused) return;
+
+    if(keys['ArrowLeft'] || keys['a'] || keys['A']) paddle.dx = -paddle.speed;
+    else if(keys['ArrowRight'] || keys['d'] || keys['D']) paddle.dx = paddle.speed;
+    else paddle.dx = 0;
+    paddle.x = Math.min(Math.max(paddle.x + paddle.dx, WALL), W - WALL - paddle.w);
+
+    if(!launched){
+      balls[0].x = paddle.x + paddle.w/2;
+      balls[0].y = paddle.y - BALL_R - 1;
+    } else {
+      for(const ball of balls){
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        if(ball.x - ball.r < WALL){ ball.x = WALL + ball.r; ball.dx *= -1; }
+        if(ball.x + ball.r > W - WALL){ ball.x = W - WALL - ball.r; ball.dx *= -1; }
+        if(ball.y - ball.r < 0){ ball.y = ball.r; ball.dy *= -1; }
+
+        // paddle collision
+        if(ball.y + ball.r >= paddle.y && ball.y + ball.r <= paddle.y + paddle.h &&
+           ball.x >= paddle.x && ball.x <= paddle.x + paddle.w && ball.dy > 0){
+          const hit = (ball.x - (paddle.x + paddle.w/2)) / (paddle.w/2);
+          const angle = hit * (Math.PI/3);
+          ball.dx = Math.sin(angle) * ball.speed;
+          ball.dy = -Math.cos(angle) * ball.speed;
+          ball.y = paddle.y - ball.r - 0.5;
+        }
+
+        // brick collisions
+        for(const b of bricks){
+          if(!b.alive) continue;
+          if(ball.x + ball.r > b.x && ball.x - ball.r < b.x + b.w &&
+             ball.y + ball.r > b.y && ball.y - ball.r < b.y + b.h){
+            b.alive = false;
+            score += b.points;
+            updateHUD();
+            const overlapX = Math.min(ball.x + ball.r - b.x, b.x + b.w - (ball.x - ball.r));
+            const overlapY = Math.min(ball.y + ball.r - b.y, b.y + b.h - (ball.y - ball.r));
+            if(overlapX < overlapY) ball.dx *= -1; else ball.dy *= -1;
+
+            const p = rollPowerup();
+            if(p){
+              const pu = POWERUPS.find(x=>x.type===p);
+              drops.push({ x: b.x + b.w/2 - 6, y: b.y + b.h/2, w:12, h:12, vy:2.2, type:p, color:pu.color });
+            }
+            break;
+          }
+        }
+      }
+
+      // remove balls that fell off bottom
+      balls = balls.filter(ball => ball.y - ball.r <= H);
+
+      if(balls.length === 0){
+        lives--; updateHUD();
+        if(lives <= 0){
+          running = false;
+          showOverlay('GAME OVER', `Final score: ${score}`, 'PLAY AGAIN');
+        } else {
+          launched = false;
+          const speed = 5.6 + (level-1)*0.4;
+          balls = [ newBall(paddle.x + paddle.w/2, paddle.y - BALL_R - 1, 0, 0, speed) ];
+        }
+      }
+
+      // falling power-up drops
+      for(const d of drops){ d.y += d.vy; }
+      drops = drops.filter(d=>{
+        if(d.y + d.h/2 >= paddle.y && d.y - d.h/2 <= paddle.y + paddle.h &&
+           d.x + d.w/2 >= paddle.x && d.x - d.w/2 <= paddle.x + paddle.w){
+          applyPowerup(d.type);
+          return false;
+        }
+        return d.y - d.h/2 <= H;
+      });
+
+      // level clear
+      if(running && bricks.every(b=>!b.alive)){
+        level++;
+        running = false;
+        showOverlay('LEVEL CLEAR', `Score: ${score} — entering level ${level}`, 'NEXT LEVEL');
+        startBtn.addEventListener('click', function nextLvl(){
+          initLevel(true);
+          running = true; paused = false;
+          hideOverlay();
+          startBtn.removeEventListener('click', nextLvl);
+        }, {once:true});
+      }
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // side walls (thick, solid)
+    const wallGrad = ctx.createLinearGradient(0,0,WALL,0);
+    wallGrad.addColorStop(0, '#0d1220');
+    wallGrad.addColorStop(1, '#26365a');
+    ctx.fillStyle = wallGrad;
+    ctx.shadowColor = '#3ff5e0';
+    ctx.shadowBlur = 10;
+    ctx.fillRect(0, 0, WALL, H);
+    ctx.fillRect(W-WALL, 0, WALL, H);
+    ctx.shadowBlur = 0;
+    // inner edge highlight so the walls read as solid, not flat
+    ctx.strokeStyle = 'rgba(63,245,224,.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(WALL, 0); ctx.lineTo(WALL, H);
+    ctx.moveTo(W-WALL, 0); ctx.lineTo(W-WALL, H);
+    ctx.stroke();
+
+    // bricks
+    for(const b of bricks){
+      if(!b.alive) continue;
+      ctx.fillStyle = b.color;
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = 8;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.shadowBlur = 0;
+    }
+
+    // power-up drops
+    for(const d of drops){
+      ctx.fillStyle = d.color;
+      ctx.shadowColor = d.color;
+      ctx.shadowBlur = 10;
+      ctx.fillRect(d.x - d.w/2, d.y - d.h/2, d.w, d.h);
+      ctx.shadowBlur = 0;
+    }
+
+    // paddle
+    ctx.fillStyle = '#3ff5e0';
+    ctx.shadowColor = '#3ff5e0';
+    ctx.shadowBlur = 10;
+    ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+    ctx.shadowBlur = 0;
+
+    // balls
+    for(const ball of balls){
+      ctx.beginPath();
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 10;
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  initLevel(false);
+  draw();
+  loop();
+})();
+</script>
+</body>
+</html>
